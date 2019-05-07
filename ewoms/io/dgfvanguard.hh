@@ -35,6 +35,8 @@
 #include <ewoms/common/propertysystem.hh>
 #include <ewoms/common/parametersystem.hh>
 
+#include <opm/grid/polyhedralgrid.hh>
+
 #include <opm/grid/verteq/topsurf.hpp>
 #include <type_traits>
 #include <string>
