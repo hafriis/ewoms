@@ -37,7 +37,7 @@
 #include <opm/material/fluidstates/ImmiscibleFluidState.hpp>
 #include <opm/material/constraintsolvers/ComputeFromReferencePhase.hpp>
 #include <opm/material/fluidmatrixinteractions/LinearMaterial.hpp>
-#include <opm/material/fluidmatrixinteractions/RegularizedBrooksCorey.hpp>
+#include <opm/material/fluidmatrixinteractions/RegularizedBrooksCoreyVE.hpp>
 #include <opm/material/fluidmatrixinteractions/EffToAbsLaw.hpp>
 #include <opm/material/fluidmatrixinteractions/MaterialTraits.hpp>
 #include <opm/material/thermal/SomertonThermalConductionLaw.hpp>
@@ -116,13 +116,10 @@ private:
                                         /*wettingPhaseIdx=*/FluidSystem::liquidPhaseIdx,
                                         /*nonWettingPhaseIdx=*/FluidSystem::gasPhaseIdx> Traits;
 
+public:
     // define the material law which is parameterized by effective
     // saturations
-    typedef Opm::RegularizedBrooksCorey<Traits> EffMaterialLaw;
-
-public:
-    // define the material law parameterized by absolute saturations
-    typedef Opm::EffToAbsLaw<EffMaterialLaw> type;
+    typedef Opm::RegularizedBrooksCoreyVE<Traits> type;
 };
 
 // Set the thermal conduction law
@@ -148,7 +145,7 @@ SET_TAG_PROP(Co2InjectionVEBaseProblem, LinearSolverSplice, ParallelAmgLinearSol
 SET_BOOL_PROP(Co2InjectionVEBaseProblem, NewtonWriteConvergence, false);
 
 // Enable gravity
-SET_BOOL_PROP(Co2InjectionVEBaseProblem, EnableGravity, true);
+SET_BOOL_PROP(Co2InjectionVEBaseProblem, EnableGravity, false);
 
 // set the defaults for the problem specific properties
 SET_SCALAR_PROP(Co2InjectionVEBaseProblem, FluidSystemPressureLow, 3e7);
@@ -283,11 +280,13 @@ public:
         finePorosity_ = 0.3;
         coarsePorosity_ = 0.3;
 
+#if 0
         // residual saturations
         fineMaterialParams_.setResidualSaturation(liquidPhaseIdx, 0.2);
         fineMaterialParams_.setResidualSaturation(gasPhaseIdx, 0.0);
         coarseMaterialParams_.setResidualSaturation(liquidPhaseIdx, 0.2);
         coarseMaterialParams_.setResidualSaturation(gasPhaseIdx, 0.0);
+#endif
 
         // parameters for the Brooks-Corey law
         fineMaterialParams_.setEntryPressure(1e4);
@@ -295,9 +294,24 @@ public:
         fineMaterialParams_.setLambda(2.0);
         coarseMaterialParams_.setLambda(2.0);
 
+        fineMaterialParams_.finalizePlain();
+        coarseMaterialParams_.finalizePlain();
+
+        typedef typename MaterialLaw::RegularizedBrooksCorey PlainLaw;
+
+#warning TODO: calculate the VE parameters!
+        Scalar krnFine = PlainLaw::twoPhaseSatKrn(fineMaterialParams_, 0.0);//Shuld be changed???
+        fineMaterialParams_.setKrnEndPoint(krnFine);
+        Scalar krwFine = PlainLaw::twoPhaseSatKrw(fineMaterialParams_, 0.2);//Shuld be changed???
+        fineMaterialParams_.setKrnEndPoint(krnFine);
+        Scalar krnC = PlainLaw::twoPhaseSatKrn(coarseMaterialParams_, 0.0);//Shuld be changed???
+        coarseMaterialParams_.setKrnEndPoint(krnC);
+        Scalar krwC = PlainLaw::twoPhaseSatKrw(coarseMaterialParams_, 0.2);//Shuld be changed???
+        coarseMaterialParams_.setKrnEndPoint(krwC);
+
         fineMaterialParams_.finalize();
         coarseMaterialParams_.finalize();
-
+        
         // parameters for the somerton law thermal conduction
         computeThermalCondParams_(fineThermalCondParams_, finePorosity_);
         computeThermalCondParams_(coarseThermalCondParams_, coarsePorosity_);
@@ -502,6 +516,7 @@ public:
     void boundary(BoundaryRateVector& values, const Context& context,
                   unsigned spaceIdx, unsigned timeIdx) const
     {
+#warning TODO: make this meaningful
         const auto& pos = context.pos(spaceIdx, timeIdx);
         if (onLeftBoundary_(pos)) {
             Opm::CompositionalFluidState<Scalar, FluidSystem> fs;
@@ -570,7 +585,11 @@ public:
                 const Context& context OPM_UNUSED,
                 unsigned spaceIdx OPM_UNUSED,
                 unsigned timeIdx OPM_UNUSED) const
-    { rate = Scalar(0.0); }
+    {
+        rate = Scalar(0.0);
+#warning do something more sensible here
+        rate[Indices::conti0EqIdx + CO2Idx] = 1e-8; // just a demo, [kg / m^3 / s]
+    }
 
     //! \}
 

@@ -110,8 +110,7 @@ public:
         //Grid3D grid3d(*gridPtr_);
       Opm::TopSurf* ts;
       ts = Opm::TopSurf::create (*dgfPointer);
-      typedef Dune::PolyhedralGrid< 2, 2 > Grid2D;
-      gridPtr_.reset(new Grid2D (*ts));
+      gridPtr_.reset(new Grid (*ts));
 
         if (numRefinments > 0)
             gridPtr_->globalRefine(static_cast<int>(numRefinments));
