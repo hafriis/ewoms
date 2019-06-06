@@ -61,6 +61,7 @@ class ImmiscibleIntensiveQuantities
     typedef typename GET_PROP_TYPE(TypeTag, ElementContext) ElementContext;
     typedef typename GET_PROP_TYPE(TypeTag, Indices) Indices;
     typedef typename GET_PROP_TYPE(TypeTag, GridView) GridView;
+    typedef typename GET_PROP_TYPE(TypeTag, Grid) Grid;
     typedef typename GET_PROP_TYPE(TypeTag, FluxModule) FluxModule;
 
     enum { numPhases = GET_PROP_VALUE(TypeTag, NumPhases) };
@@ -136,10 +137,11 @@ public:
 
             mobility_[phaseIdx] = relativePermeability_[phaseIdx]/mu;
         }
-
+        //***************************************************************
         // porosity
         porosity_ = problem.porosity(elemCtx, dofIdx, timeIdx);
 
+        //***************************************************************
         // intrinsic permeability
         intrinsicPerm_ = problem.intrinsicPermeability(elemCtx, dofIdx, timeIdx);
 

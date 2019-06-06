@@ -204,6 +204,7 @@ class Co2InjectionVEProblem : public GET_PROP_TYPE(TypeTag, BaseProblem)
     typedef typename GET_PROP_TYPE(TypeTag, Scalar) Scalar;
     typedef typename GET_PROP_TYPE(TypeTag, Evaluation) Evaluation;
     typedef typename GET_PROP_TYPE(TypeTag, GridView) GridView;
+        typedef typename GET_PROP_TYPE(TypeTag, Grid) Grid;
     typedef typename GET_PROP_TYPE(TypeTag, FluidSystem) FluidSystem;
 
     enum { dim = GridView::dimension };
@@ -415,11 +416,37 @@ public:
     template <class Context>
     Scalar porosity(const Context& context, unsigned spaceIdx, unsigned timeIdx) const
     {
-        const GlobalPosition& pos = context.pos(spaceIdx, timeIdx);
-        if (isFineMaterial_(pos))
-            return finePorosity_;
-        return coarsePorosity_;
+
+        //  return 1.0;
+        
+      Dune::VerteqColumnUtility< Grid > verteqUtil ( context.problem().simulator().vanguard().grid() );
+      const auto& stencil = context.stencil(/*timeIdx=*/timeIdx);
+      const auto& entity = stencil.entity(spaceIdx);
+      std::cout << "Start column for entity " << entity.impl().index() << std::endl;
+      const auto endCol = verteqUtil.end( entity );
+      Scalar porosity = 0.;
+      int n = 0;
+      for( auto col = verteqUtil.begin( entity ); col != endCol; ++col )
+      {
+        const auto& colCell = *col;
+        std::cout << "Column cell [ " << colCell.index()
+                  << " ]: h = " << colCell.h()
+	          << " fine cell idx " << colCell.fineCellIndex() 
+                  << " dz = "   << colCell.dz() << std::endl;
+      
+      
+        if (isFineMaterial_(colCell.h()))
+            porosity += finePorosity_;
+        
+        porosity += coarsePorosity_;
+        ++n;
+      }
+      return porosity;
     }
+
+    
+
+    
 
     /*!
      * \copydoc FvBaseMultiPhaseProblem::materialLawParams
@@ -624,6 +651,9 @@ private:
 
     bool isFineMaterial_(const GlobalPosition& pos) const
     { return pos[dim - 1] > fineLayerBottom_; }
+
+    bool isFineMaterial_(const Scalar h) const
+    { return h > fineLayerBottom_; }
 
     DimMatrix fineK_;
     DimMatrix coarseK_;
