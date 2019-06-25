@@ -228,6 +228,10 @@ class Co2InjectionVEProblem : public GET_PROP_TYPE(TypeTag, BaseProblem)
     typedef typename GET_PROP_TYPE(TypeTag, SolidEnergyLawParams) SolidEnergyLawParams;
     typedef typename ThermalConductionLaw::Params ThermalConductionLawParams;
 
+    //**********************HAF**************************************
+    typedef typename GridView::template Codim<0>::Entity Element;
+    typedef typename GET_PROP_TYPE(TypeTag, ElementContext) ElementContext;
+
     typedef Opm::MathToolbox<Evaluation> Toolbox;
     typedef typename GridView::ctype CoordScalar;
     typedef Dune::FieldVector<CoordScalar, dimWorld> GlobalPosition;
@@ -276,6 +280,11 @@ public:
         fineK_ = this->toDimMatrix_(1e-13);
         coarseK_ = this->toDimMatrix_(1e-12);
 
+        //*****HAF---START*********************************
+        fineIsotropicPerm_ = 1e-13;
+        coarseIsotropicPerm_ = 1e-12;
+        //*****HAF---END*********************************
+
         // porosities
         finePorosity_ = 0.3;
         coarsePorosity_ = 0.3;
@@ -320,7 +329,64 @@ public:
         solidEnergyLawParams_.setSolidHeatCapacity(790.0 // specific heat capacity of granite [J / (kg K)]
                                                    * 2700.0); // density of granite [kg/m^3]
         solidEnergyLawParams_.finalize();
+
+        //**********************HAF**************************************
+        initializeH_VE();
+        initializeSmax_VE();
     }
+
+
+    //**********************HAF**************************************
+    void initializeH_VE()
+    {
+#warning TODO: Vil griddet fra topSurf og 2D griddet her ha samme nummerering? Hvis ikke har vi vel et problem...
+
+        const auto& simulator = this->simulator();
+
+        ElementContext elemCtx(simulator);
+        Dune::VerteqColumnUtility<Grid> verteqUtil (elemCtx.problem().simulator().vanguard().grid());
+        const auto& vanguard = simulator.vanguard();
+        auto elemIt = vanguard.gridView().template begin</*codim=*/0>();
+        const auto& elemEndIt = vanguard.gridView().template end</*codim=*/0>();
+        for (; elemIt != elemEndIt; ++elemIt) {
+            const Element& elem = *elemIt;
+
+            elemCtx.updatePrimaryStencil(elem);
+            const auto& stencil = elemCtx.stencil(/*timeIdx=*/ 0); //OK med 0 ???
+            unsigned compressedDofIdx = elemCtx.globalSpaceIndex(/*spaceIdx=*/0, /*timeIdx=*/0); //OK med 0 i argumentene???
+            //const auto& entity = stencil.entity(spaceIdx);
+            const auto& entity = stencil.entity(compressedDofIdx); //OK???
+            H_VE_.push_back(verteqUtil.get_H_VE(entity));
+        }
+    }
+    
+    void initializeSmax_VE()
+    {
+        const auto& simulator = this->simulator();
+
+        ElementContext elemCtx(simulator);
+        const auto& vanguard = simulator.vanguard();
+        auto elemIt = vanguard.gridView().template begin</*codim=*/0>();
+        const auto& elemEndIt = vanguard.gridView().template end</*codim=*/0>();
+        for (; elemIt != elemEndIt; ++elemIt) {
+            //const Element& elem = *elemIt;
+            
+            //elemCtx.updatePrimaryStencil(elem);
+            //elemCtx.updatePrimaryIntensiveQuantities(/*timeIdx=*/0);
+            
+            //unsigned compressedDofIdx = elemCtx.globalSpaceIndex(/*spaceIdx=*/0, /*timeIdx=*/0);
+            
+            //const auto& iq = elemCtx.intensiveQuantities(/*spaceIdx=*/0, /*timeIdx=*/0);
+            //const auto& fs = iq.fluidState();
+            //Scalar So = Opm::decay<Scalar>(fs.saturation(oilPhaseIdx));
+            //maxOilSaturation_[compressedDofIdx] = std::max(maxOilSaturation_[compressedDofIdx], So);
+
+            Scalar initialValue = 0.0; //Should be changed...
+            SmaxVE_.push_back(initialValue);
+        }
+        
+    }
+    
 
     /*!
      * \copydoc FvBaseMultiPhaseProblem::registerParameters
@@ -422,8 +488,50 @@ public:
         if (isFineMaterial_(pos))
             return fineK_;
         return coarseK_;
+       
     }
 
+
+    /*!
+     * \copydoc ???????
+     */
+    //*****HAF---START*********************************
+    template <class Context>
+    Scalar integratedPermeability(const Context& context, unsigned spaceIdx,
+                                           unsigned timeIdx) const
+    {
+        //******************************************************************
+        //NOTE: We assume (for now) isotropic permeability!!!
+        //******************************************************************
+        //@HAF
+        
+        Dune::VerteqColumnUtility< Grid > verteqUtil ( context.problem().simulator().vanguard().grid() );
+        const auto& stencil = context.stencil(/*timeIdx=*/timeIdx);
+        const auto& entity = stencil.entity(spaceIdx);
+        const auto endCol = verteqUtil.end( entity );
+        Scalar perm = 0.0;
+        for( auto col = verteqUtil.begin( entity ); col != endCol; ++col )
+        {
+            const auto& colCell = *col;
+
+            if (isFineMaterial_(colCell.h()))
+            {
+                perm += fineIsotropicPerm_;
+            }
+            else
+            {
+                perm += coarseIsotropicPerm_;
+            }
+            perm *= colCell.dz();
+        }
+
+        //std::cout << "permeability= " << perm << std::endl; exit(0);
+
+        return perm;
+    }
+    //*****HAF---END***********************************
+
+    
     /*!
      * \copydoc FvBaseMultiPhaseProblem::porosity
      */
@@ -438,23 +546,33 @@ public:
       const auto& entity = stencil.entity(spaceIdx);
       std::cout << "Start column for entity " << entity.impl().index() << std::endl;
       const auto endCol = verteqUtil.end( entity );
-      Scalar porosity = 0.;
-      int n = 0;
+      Scalar porosity = 0.0;
       for( auto col = verteqUtil.begin( entity ); col != endCol; ++col )
       {
         const auto& colCell = *col;
+        /*
         std::cout << "Column cell [ " << colCell.index()
                   << " ]: h = " << colCell.h()
 	          << " fine cell idx " << colCell.fineCellIndex() 
                   << " dz = "   << colCell.dz() << std::endl;
+        */
       
       
+        //if (isFineMaterial_(colCell.h()))
+        //   porosity += finePorosity_;
+
         if (isFineMaterial_(colCell.h()))
-            porosity += finePorosity_;
-        
-        porosity += coarsePorosity_;
-        ++n;
+        {
+            porosity += colCell.dz()*finePorosity_;
+        }
+        else
+        {
+            porosity += colCell.dz()*coarsePorosity_;
+        }
       }
+      //std::cout << "porosity= " << finePorosity_ << std::endl; //exit(0);
+      //std::cout << "porosity= " << coarsePorosity_ << std::endl; //exit(0);
+      //std::cout << "porosity= " << porosity << std::endl; exit(0);
       return porosity;
     }
 
@@ -678,6 +796,11 @@ private:
     DimMatrix coarseK_;
     Scalar fineLayerBottom_;
 
+    //*****HAF---START*********************************
+    Scalar fineIsotropicPerm_;
+    Scalar coarseIsotropicPerm_;
+    //*****HAF---END*********************************
+
     Scalar finePorosity_;
     Scalar coarsePorosity_;
 
@@ -697,6 +820,10 @@ private:
 
     Scalar pressureLow_, pressureHigh_;
     Scalar temperatureLow_, temperatureHigh_;
+
+    //**********************HAF**************************************
+    std::vector<Scalar> SmaxVE_;
+    std::vector<Scalar> H_VE_;
 };
 } // namespace Ewoms
 
