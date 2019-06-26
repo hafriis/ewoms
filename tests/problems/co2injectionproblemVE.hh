@@ -289,14 +289,6 @@ public:
         finePorosity_ = 0.3;
         coarsePorosity_ = 0.3;
 
-#if 0
-        // residual saturations
-        fineMaterialParams_.setResidualSaturation(liquidPhaseIdx, 0.2);
-        fineMaterialParams_.setResidualSaturation(gasPhaseIdx, 0.0);
-        coarseMaterialParams_.setResidualSaturation(liquidPhaseIdx, 0.2);
-        coarseMaterialParams_.setResidualSaturation(gasPhaseIdx, 0.0);
-#endif
-
         // parameters for the Brooks-Corey law
         fineMaterialParams_.setEntryPressure(1e4);
         coarseMaterialParams_.setEntryPressure(5e3);
@@ -308,14 +300,23 @@ public:
 
         typedef typename MaterialLaw::RegularizedBrooksCorey PlainLaw;
 
-#warning TODO: calculate the VE parameters!
-        Scalar krnFine = PlainLaw::twoPhaseSatKrn(fineMaterialParams_, 0.0);//Shuld be changed???
+#warning TODO: calculate the VE parameters! --- Seems OK now..
+        // residual saturations
+        Scalar srw = 0.27;
+        Scalar srn = 0.2;
+        fineMaterialParams_.setResidualSaturation(liquidPhaseIdx, srw); //OK???????
+        fineMaterialParams_.setResidualSaturation(gasPhaseIdx, srn); //OK???????
+        coarseMaterialParams_.setResidualSaturation(liquidPhaseIdx, srw); //OK???????
+        coarseMaterialParams_.setResidualSaturation(gasPhaseIdx, srn); //OK???????
+
+        //End points for the relative permeabilities:
+        Scalar krnFine = PlainLaw::twoPhaseSatKrn(fineMaterialParams_, srn);//Shuld be changed???
         fineMaterialParams_.setKrnEndPoint(krnFine);
-        Scalar krwFine = PlainLaw::twoPhaseSatKrw(fineMaterialParams_, 0.2);//Shuld be changed???
+        Scalar krwFine = PlainLaw::twoPhaseSatKrw(fineMaterialParams_, srw);//Shuld be changed???
         fineMaterialParams_.setKrnEndPoint(krnFine);
-        Scalar krnC = PlainLaw::twoPhaseSatKrn(coarseMaterialParams_, 0.0);//Shuld be changed???
+        Scalar krnC = PlainLaw::twoPhaseSatKrn(coarseMaterialParams_, srn);//Shuld be changed???
         coarseMaterialParams_.setKrnEndPoint(krnC);
-        Scalar krwC = PlainLaw::twoPhaseSatKrw(coarseMaterialParams_, 0.2);//Shuld be changed???
+        Scalar krwC = PlainLaw::twoPhaseSatKrw(coarseMaterialParams_, srw);//Shuld be changed???
         coarseMaterialParams_.setKrnEndPoint(krwC);
 
         fineMaterialParams_.finalize();
@@ -331,23 +332,28 @@ public:
         solidEnergyLawParams_.finalize();
 
         //**********************HAF**************************************
-        initializeH_VE();
         initializeSmax_VE();
+        initializeH_VE();
     }
 
 
     //**********************HAF**************************************
     void initializeH_VE()
     {
-#warning TODO: Vil griddet fra topSurf og 2D griddet her ha samme nummerering? Hvis ikke har vi vel et problem...
+#warning TODO: Vil griddet fra topSurf og 2D griddet her ha samme nummerering? Hvis ikke har vi vel et problem...f.eks. i statementet H_VE_[idx] = verteqUtil.get_H_VE(compressedDofIdx) nedenfor.
 
         const auto& simulator = this->simulator();
 
         ElementContext elemCtx(simulator);
         Dune::VerteqColumnUtility<Grid> verteqUtil (elemCtx.problem().simulator().vanguard().grid());
         const auto& vanguard = simulator.vanguard();
+        const auto& gridView = vanguard.gridView();
+        int numElements = gridView.size(/*codim=*/0);
+        H_VE_.resize(numElements, 0.0);
+                
         auto elemIt = vanguard.gridView().template begin</*codim=*/0>();
         const auto& elemEndIt = vanguard.gridView().template end</*codim=*/0>();
+        int idx = 0;
         for (; elemIt != elemEndIt; ++elemIt) {
             const Element& elem = *elemIt;
 
@@ -355,8 +361,13 @@ public:
             const auto& stencil = elemCtx.stencil(/*timeIdx=*/ 0); //OK med 0 ???
             unsigned compressedDofIdx = elemCtx.globalSpaceIndex(/*spaceIdx=*/0, /*timeIdx=*/0); //OK med 0 i argumentene???
             //const auto& entity = stencil.entity(spaceIdx);
+            //std::cout << "compressedDofIdx= " <<  compressedDofIdx << std::endl;
             const auto& entity = stencil.entity(compressedDofIdx); //OK???
-            H_VE_.push_back(verteqUtil.get_H_VE(entity));
+            //H_VE_.push_back(verteqUtil.get_H_VE(entity));
+            //H_VE_[idx] = verteqUtil.get_H_VE(entity); //@HAF: Does NOT work. Seg. error!!!
+            H_VE_[idx] = verteqUtil.get_H_VE(compressedDofIdx);
+            std::cout << "H_VE_[idx]= " <<  H_VE_[idx] << std::endl;
+            idx++;
         }
     }
     
@@ -364,11 +375,16 @@ public:
     {
         const auto& simulator = this->simulator();
 
-        ElementContext elemCtx(simulator);
         const auto& vanguard = simulator.vanguard();
-        auto elemIt = vanguard.gridView().template begin</*codim=*/0>();
-        const auto& elemEndIt = vanguard.gridView().template end</*codim=*/0>();
-        for (; elemIt != elemEndIt; ++elemIt) {
+        const auto& gridView = vanguard.gridView();
+        int numElements = gridView.size(/*codim=*/0);
+        SmaxVE_.resize(numElements, 0.0);
+
+        //ElementContext elemCtx(simulator);
+        //const auto& vanguard = simulator.vanguard();
+        //auto elemIt = vanguard.gridView().template begin</*codim=*/0>();
+        //const auto& elemEndIt = vanguard.gridView().template end</*codim=*/0>();
+        //for (; elemIt != elemEndIt; ++elemIt) {
             //const Element& elem = *elemIt;
             
             //elemCtx.updatePrimaryStencil(elem);
@@ -381,9 +397,9 @@ public:
             //Scalar So = Opm::decay<Scalar>(fs.saturation(oilPhaseIdx));
             //maxOilSaturation_[compressedDofIdx] = std::max(maxOilSaturation_[compressedDofIdx], So);
 
-            Scalar initialValue = 0.0; //Should be changed...
-            SmaxVE_.push_back(initialValue);
-        }
+            //Scalar initialValue = 0.0; //Should be changed...
+            //SmaxVE_.push_back(initialValue);
+        //}
         
     }
     
@@ -706,6 +722,12 @@ public:
     {
         rate = Scalar(0.0);
 #warning do something more sensible here
+        //Do we have one or more point sources here?
+        //In the case of a point source, it must just be placed in the 2D grid anyway,
+        //since vetical integration does not matter in that case. But if the source
+        //spreads out over several column cells, we must perform an integration
+        //using Dune::VerteqColumnUtility< Grid >
+        //In any case it seems like the position(s) of the source(s) must be hardcoded in this routine...
         rate[Indices::conti0EqIdx + CO2Idx] = 1e-8; // just a demo, [kg / m^3 / s]
     }
 
@@ -752,6 +774,7 @@ private:
         fs.setMoleFraction(liquidPhaseIdx, BrineIdx,
                            1.0 - fs.moleFraction(liquidPhaseIdx, CO2Idx));
 
+        //Fjerne dette???
         typename FluidSystem::template ParameterCache<Scalar> paramCache;
         typedef Opm::ComputeFromReferencePhase<Scalar, FluidSystem> CFRP;
         CFRP::solve(fs, paramCache,
