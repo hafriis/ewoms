@@ -111,6 +111,13 @@ public:
         }
         fluidState_.setSaturation(numPhases - 1, 1 - sumSat);
 
+        //***************************HAF******START***********************************
+        //@HAF: Should this code snippet be placed here or e.g. at the end of this routine???
+        Scalar S = fluidState_.saturation(0); //OK for nonWettingPhase index???
+        Scalar Smax = fluidState_.getSmax();
+        if (S > Smax) fluidState_.setSmax(Smax); 
+        //***************************HAF******END*************************************
+
         EvalPhaseVector pC;
         MaterialLaw::capillaryPressures(pC, materialParams, fluidState_);
         Opm::Valgrind::CheckDefined(pC);
