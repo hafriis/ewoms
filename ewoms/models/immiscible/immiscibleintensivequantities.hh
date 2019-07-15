@@ -113,9 +113,11 @@ public:
 
         //***************************HAF******START***********************************
         //@HAF: Should this code snippet be placed here or e.g. at the end of this routine???
-        Scalar S = fluidState_.saturation(0); //OK for nonWettingPhase index???
-        Scalar Smax = fluidState_.getSmax();
-        if (S > Smax) fluidState_.setSmax(Smax); 
+        Scalar S = fluidState_.saturation(FluidSystem::gasPhaseIdx); //@HAF: OK for nonWettingPhase index???
+        Scalar Smax = problem.getSmax_VE(elemCtx, dofIdx, timeIdx);
+        Scalar H = problem.getH_VE(elemCtx, dofIdx, timeIdx);
+        fluidState_.setH_VE(H); 
+        (S > Smax) ? fluidState_.setSmax(S) : fluidState_.setSmax(Smax);
         //***************************HAF******END*************************************
 
         EvalPhaseVector pC;
@@ -151,7 +153,6 @@ public:
         //***************************************************************
         // intrinsic permeability
         intrinsicPerm_ = problem.intrinsicPermeability(elemCtx, dofIdx, timeIdx);
-
         // energy related quantities
         EnergyIntensiveQuantities::update_(fluidState_, paramCache, elemCtx, dofIdx, timeIdx);
 
