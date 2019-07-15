@@ -278,16 +278,13 @@ public:
 
         // intrinsic permeabilities
         fineK_ = this->toDimMatrix_(1e-13);
-        coarseK_ = this->toDimMatrix_(1e-12);
-
-        //*****HAF---START*********************************
-        fineIsotropicPerm_ = 1e-13;
-        coarseIsotropicPerm_ = 1e-12;
-        //*****HAF---END*********************************
+        //carseK_ = this->toDimMatrix_(1e-12);
+        coarseK_ = this->toDimMatrix_(1e-13); //NOTE: No heterogeneity yet!!!
+        computeIntegratedPermeabilities(); //@HAF
 
         // porosities
         finePorosity_ = 0.3;
-        coarsePorosity_ = 0.3;
+        coarsePorosity_ = 0.3; //NOTE: No heterogeneity yet!!!
 
         // parameters for the Brooks-Corey law
         fineMaterialParams_.setEntryPressure(1e4);
@@ -360,9 +357,9 @@ public:
             elemCtx.updatePrimaryStencil(elem);
             const auto& stencil = elemCtx.stencil(/*timeIdx=*/ 0); //OK med 0 ???
             unsigned compressedDofIdx = elemCtx.globalSpaceIndex(/*spaceIdx=*/0, /*timeIdx=*/0); //OK med 0 i argumentene???
-            //const auto& entity = stencil.entity(spaceIdx);
+            //const auto& entity = stencil.entity(spaceIdx); //PRØV DENNE!!! spaceIdx er vanligvis 0 (tilsv. for timeIdx)
             //std::cout << "compressedDofIdx= " <<  compressedDofIdx << std::endl;
-            const auto& entity = stencil.entity(compressedDofIdx); //OK???
+            //const auto& entity = stencil.entity(compressedDofIdx); //OK???NEI, blir feil her!!!
             //H_VE_.push_back(verteqUtil.get_H_VE(entity));
             //H_VE_[idx] = verteqUtil.get_H_VE(entity); //@HAF: Does NOT work. Seg. error!!!
             H_VE_[idx] = verteqUtil.get_H_VE(compressedDofIdx);
@@ -370,6 +367,22 @@ public:
             idx++;
         }
     }
+
+
+    template <class Context>
+    void setH_VE(const Context& context, unsigned dofIdx, unsigned timeIdx, Scalar value)
+    {
+        unsigned compressedDofIdx = context.globalSpaceIndex(dofIdx, timeIdx);
+        H_VE_[compressedDofIdx] = value;
+    }
+
+    template <class Context>
+    Scalar getH_VE(const Context& context, unsigned dofIdx, unsigned timeIdx) const
+    {
+        unsigned compressedDofIdx = context.globalSpaceIndex(dofIdx, timeIdx);
+        return H_VE_[compressedDofIdx];
+    }
+    
     
     void initializeSmax_VE()
     {
@@ -404,6 +417,21 @@ public:
     }
     
 
+    template <class Context>
+    void setSmax_VE(const Context& context, unsigned dofIdx, unsigned timeIdx, Scalar value)
+    {
+        unsigned compressedDofIdx = context.globalSpaceIndex(dofIdx, timeIdx);
+        SmaxVE_[compressedDofIdx] = value;
+    }
+
+    template <class Context>
+    Scalar getSmax_VE(const Context& context, unsigned dofIdx, unsigned timeIdx) const
+    {
+        unsigned compressedDofIdx = context.globalSpaceIndex(dofIdx, timeIdx);
+        return SmaxVE_[compressedDofIdx];
+    }
+
+    
     /*!
      * \copydoc FvBaseMultiPhaseProblem::registerParameters
      */
@@ -479,6 +507,29 @@ public:
                       << " gas=[" << storageG << "]\n" << std::flush;
         }
 #endif // NDEBUG
+        //***************************HAF******START***********************************
+        //@HAF: Should this code snippet be here???
+        const auto& simulator = this->simulator();
+        ElementContext elemCtx(simulator);
+        const auto& vanguard = simulator.vanguard();
+        auto elemIt = vanguard.gridView().template begin</*codim=*/0>();
+        const auto& elemEndIt = vanguard.gridView().template end</*codim=*/0>();
+        for (; elemIt != elemEndIt; ++elemIt)
+        {
+            const Element& elem = *elemIt;
+
+            elemCtx.updatePrimaryStencil(elem);
+            elemCtx.updatePrimaryIntensiveQuantities(/*timeIdx=*/0);
+
+            unsigned compressedDofIdx = elemCtx.globalSpaceIndex(/*spaceIdx=*/0, /*timeIdx=*/0);
+            const auto& iq = elemCtx.intensiveQuantities(/*spaceIdx=*/0, /*timeIdx=*/0);
+            const auto& fs = iq.fluidState();
+
+            Scalar Sn = Opm::decay<Scalar>(fs.saturation(gasPhaseIdx)); //@HAF: Is this the index we want?
+            
+            SmaxVE_[compressedDofIdx] = std::max(SmaxVE_[compressedDofIdx], Sn);
+        }
+        //***************************HAF******END*************************************
     }
 
     /*!
@@ -500,11 +551,14 @@ public:
     const DimMatrix& intrinsicPermeability(const Context& context, unsigned spaceIdx,
                                            unsigned timeIdx) const
     {
-        const GlobalPosition& pos = context.pos(spaceIdx, timeIdx);
-        if (isFineMaterial_(pos))
-            return fineK_;
-        return coarseK_;
-       
+        //const GlobalPosition& pos = context.pos(spaceIdx, timeIdx);
+        //if (isFineMaterial_(pos))
+        //    return fineK_;
+        //return coarseK_;
+
+        //unsigned compressedDofIdx = context.globalSpaceIndex(/*spaceIdx=*/0, /*timeIdx=*/0);
+        unsigned compressedDofIdx = context.globalSpaceIndex(spaceIdx, timeIdx);
+        return integratedPermA_[compressedDofIdx];
     }
 
 
@@ -512,9 +566,37 @@ public:
      * \copydoc ???????
      */
     //*****HAF---START*********************************
+    void computeIntegratedPermeabilities()
+    {
+        //******************************************************************
+        //NOTE: We assume (for now) isotropic permeability!!!
+        //******************************************************************
+        //@HAF
+
+        const auto& simulator = this->simulator();
+        ElementContext elemCtx(simulator);
+
+        const auto& vanguard = simulator.vanguard();
+        const auto& gridView = vanguard.gridView();
+        int numElements = gridView.size(/*codim=*/0);
+        integratedPermA_.resize(numElements);
+                
+        auto elemIt = vanguard.gridView().template begin</*codim=*/0>();
+        const auto& elemEndIt = vanguard.gridView().template end</*codim=*/0>();
+        int idx = 0;
+
+        for (; elemIt != elemEndIt; ++elemIt) {
+            const Element& elem = *elemIt;
+
+            elemCtx.updatePrimaryStencil(elem);
+            computeSpecificIntegratedPermeability(elemCtx, /*spaceIdx*/ 0, /*timeIdx*/ 0, idx);
+            idx++;
+        }
+    }
+
+
     template <class Context>
-    Scalar integratedPermeability(const Context& context, unsigned spaceIdx,
-                                           unsigned timeIdx) const
+        void computeSpecificIntegratedPermeability(const Context& context, unsigned spaceIdx, unsigned timeIdx, const int& idx)
     {
         //******************************************************************
         //NOTE: We assume (for now) isotropic permeability!!!
@@ -524,26 +606,30 @@ public:
         Dune::VerteqColumnUtility< Grid > verteqUtil ( context.problem().simulator().vanguard().grid() );
         const auto& stencil = context.stencil(/*timeIdx=*/timeIdx);
         const auto& entity = stencil.entity(spaceIdx);
+        //std::cout << "Start column for entity " << entity.impl().index() << std::endl;
         const auto endCol = verteqUtil.end( entity );
         Scalar perm = 0.0;
+        Scalar fineIsotropicPerm = fineK_[0][0];
+        Scalar coarseIsotropicPerm = coarseK_[0][0];
+        
         for( auto col = verteqUtil.begin( entity ); col != endCol; ++col )
         {
             const auto& colCell = *col;
 
             if (isFineMaterial_(colCell.h()))
             {
-                perm += fineIsotropicPerm_;
+                perm += fineIsotropicPerm;
             }
             else
             {
-                perm += coarseIsotropicPerm_;
+                perm += coarseIsotropicPerm;
             }
             perm *= colCell.dz();
         }
-
+        
         //std::cout << "permeability= " << perm << std::endl; exit(0);
 
-        return perm;
+        integratedPermA_[idx] = this->toDimMatrix_(perm);
     }
     //*****HAF---END***********************************
 
@@ -650,8 +736,20 @@ public:
     void boundary(BoundaryRateVector& values, const Context& context,
                   unsigned spaceIdx, unsigned timeIdx) const
     {
-#warning TODO: make this meaningful
+#warning TODO: make this meaningful: We let (at least for the time being) setFreeFlow at all the boundaries.
         const auto& pos = context.pos(spaceIdx, timeIdx);
+
+        // Temporary BC's from HAF ****START*************************************
+        Opm::CompositionalFluidState<Scalar, FluidSystem> fs;
+        initialFluidState_(fs, context, spaceIdx, timeIdx);
+        fs.checkDefined();
+
+        // impose an freeflow boundary condition --- 
+        values.setFreeFlow(context, spaceIdx, timeIdx, fs); //This is a constant pressure BC???
+        //values.setNoFlow(); //No flow...
+        // Temporary BC's from HAF ****END***************************************
+
+        /*
         if (onLeftBoundary_(pos)) {
             Opm::CompositionalFluidState<Scalar, FluidSystem> fs;
             initialFluidState_(fs, context, spaceIdx, timeIdx);
@@ -662,7 +760,7 @@ public:
         }
         else if (onInlet_(pos)) {
             RateVector massRate(0.0);
-            massRate[contiCO2EqIdx] = -1e-3; // [kg/(m^3 s)]
+            massRate[contiCO2EqIdx] = -1e-3; // [kg/(m^3 s)] ... arealet istedet??? eller per meter i 2D??????
 
             typedef Opm::ImmiscibleFluidState<Scalar, FluidSystem> FluidState;
             FluidState fs;
@@ -683,6 +781,8 @@ public:
         else
             // no flow on top and bottom
             values.setNoFlow();
+        */
+        
     }
 
     // \}
@@ -723,12 +823,27 @@ public:
         rate = Scalar(0.0);
 #warning do something more sensible here
         //Do we have one or more point sources here?
-        //In the case of a point source, it must just be placed in the 2D grid anyway,
-        //since vetical integration does not matter in that case. But if the source
+        //In the case of a point source, it must be placed in the 2D grid anyway,
+        //since vertical integration does not matter in this test case when dz=1.......
+        //But if the source
         //spreads out over several column cells, we must perform an integration
         //using Dune::VerteqColumnUtility< Grid >
-        //In any case it seems like the position(s) of the source(s) must be hardcoded in this routine...
-        rate[Indices::conti0EqIdx + CO2Idx] = 1e-8; // just a demo, [kg / m^3 / s]
+        //In any case it seems like the position(s) of the source(s) must be hardcoded in this routine.
+        //I guess such kind of information can be found from the grid...
+        //@haf: how to find the geometry from the grid???
+        //@haf: NOTE: For the time being we just skip the integration (which generally MUST
+        //be done even if we have a point source since we need dz), and just assume that
+        //dz = 1 !!!
+        //@haf: Moreover, we "cheat" for the time being abd (for test purposes) just put in a
+        //point source in a valid point in the (2D) grid. We just choose the index 100.
+        //Later on this should be coded properly!!!
+        unsigned globalDofIdx = context.globalSpaceIndex(spaceIdx, timeIdx);
+        int HAFTestIndex = 100;
+        if (globalDofIdx == HAFTestIndex)
+        {
+            //rate[Indices::conti0EqIdx + CO2Idx] = 1e-8; // just a demo, [kg / m^3 / s]
+            rate[FluidSystem::gasPhaseIdx] = 1e-8; // just a demo, [kg / m^3 / s]
+        }
     }
 
     //! \}
@@ -756,9 +871,11 @@ private:
         //////
         // set pressures
         //////
-        Scalar densityL = FluidSystem::Brine::liquidDensity(temperature_, Scalar(1e5));
-        Scalar depth = maxDepth_ - pos[dim - 1];
-        Scalar pl = 1e5 - densityL * this->gravity()[dim - 1] * depth;
+        //Scalar densityL = FluidSystem::Brine::liquidDensity(temperature_, Scalar(1e5));
+        Scalar densityL = FluidSystem::Brine::liquidDensity(temperature_, Scalar(1e0));//@HAF: OK for VE? (see also line above)
+        //Scalar depth = maxDepth_ - pos[dim - 1]; //@HAF: Not relevant for VE???
+        //Scalar pl = 1e5 - densityL * this->gravity()[dim - 1] * depth; //@HAF: Not relevant for VE???
+        Scalar pl = 1e5; //@HAF: New.
 
         Scalar pC[numPhases];
         const auto& matParams = this->materialLawParams(context, spaceIdx, timeIdx);
@@ -770,9 +887,10 @@ private:
         //////
         // set composition of the liquid phase
         //////
-        fs.setMoleFraction(liquidPhaseIdx, CO2Idx, 0.005);
-        fs.setMoleFraction(liquidPhaseIdx, BrineIdx,
-                           1.0 - fs.moleFraction(liquidPhaseIdx, CO2Idx));
+        //fs.setMoleFraction(liquidPhaseIdx, CO2Idx, 0.005);
+        //fs.setMoleFraction(liquidPhaseIdx, BrineIdx, 1.0 - fs.moleFraction(liquidPhaseIdx, CO2Idx));
+        fs.setMoleFraction(liquidPhaseIdx, CO2Idx, 0.0); //@HAF: OK???
+        fs.setMoleFraction(liquidPhaseIdx, BrineIdx, 1.0 - fs.moleFraction(liquidPhaseIdx, CO2Idx)); //@HAF: OK???
 
         //Fjerne dette???
         typename FluidSystem::template ParameterCache<Scalar> paramCache;
@@ -819,11 +937,6 @@ private:
     DimMatrix coarseK_;
     Scalar fineLayerBottom_;
 
-    //*****HAF---START*********************************
-    Scalar fineIsotropicPerm_;
-    Scalar coarseIsotropicPerm_;
-    //*****HAF---END*********************************
-
     Scalar finePorosity_;
     Scalar coarsePorosity_;
 
@@ -847,6 +960,7 @@ private:
     //**********************HAF**************************************
     std::vector<Scalar> SmaxVE_;
     std::vector<Scalar> H_VE_;
+    std::vector<DimMatrix> integratedPermA_; //HAF
 };
 } // namespace Ewoms
 
