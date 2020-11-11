@@ -108,21 +108,35 @@ public:
             const Evaluation& Salpha = priVars.makeEvaluation(saturation0Idx + phaseIdx, timeIdx);
             fluidState_.setSaturation(phaseIdx, Salpha);
             sumSat += Salpha;
+            //HAF: JUKS!!! START *****************************************
+            /*
+            if (Salpha < 0.0)
+            {
+                fluidState_.setSaturation(phaseIdx, 0.0);
+                sumSat = 0.0;
+            }
+            else
+            {
+                fluidState_.setSaturation(phaseIdx, Salpha);
+                sumSat += Salpha;
+            }
+            */
+            //HAF: JUKS!!! END ********************************************
         }
         fluidState_.setSaturation(numPhases - 1, 1 - sumSat);
 
         //***************************HAF******START***********************************
+        // /*
+        //NOTE: For testing without VE influence!
         //@HAF: Should this code snippet be placed here or e.g. at the end of this routine???
         Scalar S = fluidState_.saturation(FluidSystem::gasPhaseIdx); //@HAF: OK for nonWettingPhase index???
         Scalar Smax = problem.getSmax_VE(elemCtx, dofIdx, timeIdx);
         Scalar H = problem.getH_VE(elemCtx, dofIdx, timeIdx);
+        //std::cout << "H_VE= " <<  H << " Smax= " <<  Smax << std::endl;
         fluidState_.setH_VE(H); 
         (S > Smax) ? fluidState_.setSmax(S) : fluidState_.setSmax(Smax);
+        // */
         //***************************HAF******END*************************************
-
-        EvalPhaseVector pC;
-        MaterialLaw::capillaryPressures(pC, materialParams, fluidState_);
-        Opm::Valgrind::CheckDefined(pC);
 
         // calculate relative permeabilities
         MaterialLaw::relativePermeabilities(relativePermeability_, materialParams, fluidState_);
@@ -130,7 +144,7 @@ public:
 
         const Evaluation& p0 = priVars.makeEvaluation(pressure0Idx, timeIdx);
         for (unsigned phaseIdx = 0; phaseIdx < numPhases; ++phaseIdx)
-            fluidState_.setPressure(phaseIdx, p0 + (pC[phaseIdx] - pC[0]));
+            fluidState_.setPressure(phaseIdx, p0); //@HAF: OK for densities??? Different from @HAF1 below!?!
 
         typename FluidSystem::template ParameterCache<Evaluation> paramCache;
         paramCache.updateAll(fluidState_);
@@ -139,16 +153,28 @@ public:
             // compute and set the viscosity
             const Evaluation& mu = FluidSystem::viscosity(fluidState_, paramCache, phaseIdx);
             fluidState_.setViscosity(phaseIdx, mu);
-
+            //std::cout << " viscosity" << phaseIdx << " = " << mu << std::endl;
             // compute and set the density
             const Evaluation& rho = FluidSystem::density(fluidState_, paramCache, phaseIdx);
             fluidState_.setDensity(phaseIdx, rho);
+            //std::cout << " Arild_IIQ_phaseIdx= " << phaseIdx << " Arild_IIQ_rho= " << rho << std::endl;
 
             mobility_[phaseIdx] = relativePermeability_[phaseIdx]/mu;
         }
         //***************************************************************
+        
+        EvalPhaseVector pC;
+        MaterialLaw::capillaryPressures(pC, materialParams, fluidState_);
+        Opm::Valgrind::CheckDefined(pC);
+        
+        //const Evaluation& p0 = priVars.makeEvaluation(pressure0Idx, timeIdx);
+        for (unsigned phaseIdx = 0; phaseIdx < numPhases; ++phaseIdx)
+            fluidState_.setPressure(phaseIdx, p0 + (pC[phaseIdx] - pC[0])); 
+        
         // porosity
         porosity_ = problem.porosity(elemCtx, dofIdx, timeIdx);
+        //unsigned globalIdx = elemCtx.globalSpaceIndex(dofIdx, timeIdx);
+        //std::cout << " globalIdx= " << globalIdx << " VolumeTH= " << problem.model().dofTotalVolume(globalIdx) << " porosity= " << porosity_ << std::endl;
 
         //***************************************************************
         // intrinsic permeability
@@ -159,6 +185,7 @@ public:
         // update the quantities specific for the velocity model
         FluxIntensiveQuantities::update_(elemCtx, dofIdx, timeIdx);
 
+        //std::cout << " intrinsicPerm= " << intrinsicPerm_ << std::endl;
     }
 
     /*!

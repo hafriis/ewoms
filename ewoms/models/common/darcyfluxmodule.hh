@@ -379,7 +379,7 @@ protected:
             // the distance between the face center and the center of the control volume
             DimVector distVecIn(posIn);
             distVecIn -= posFace;
-            Scalar absDist = distVecIn.two_norm();
+            Scalar absDist = distVecIn.two_norm2();
             Scalar gTimesDist = gIn*distVecIn;
 
             for (unsigned phaseIdx=0; phaseIdx < numPhases; phaseIdx++) {
@@ -399,7 +399,7 @@ protected:
                 // boundary, 'pStaticExterior' is zero as the boundary pressure is
                 // defined on boundary face's integration point...
                 EvalDimVector f(distVecIn);
-                f *= - pStatIn/absDist;
+                f *= pStatIn/absDist;
 
                 // calculate the final potential gradient
                 for (unsigned dimIdx = 0; dimIdx < dimWorld; ++dimIdx)
@@ -499,6 +499,8 @@ protected:
         const auto& scvf = elemCtx.stencil(timeIdx).boundaryFace(boundaryFaceIdx);
         const DimVector& normal = scvf.normal();
         Opm::Valgrind::CheckDefined(normal);
+
+        //std::cout << " THNormal0= " << normal[0] << " THNormal1= " << normal[1] << std::endl;
 
         for (unsigned phaseIdx=0; phaseIdx < numPhases; phaseIdx++) {
             if (!elemCtx.model().phaseIsConsidered(phaseIdx)) {

@@ -475,6 +475,7 @@ public:
     void boundary(BoundaryRateVector& values, const Context& context,
                   unsigned spaceIdx, unsigned timeIdx) const
     {
+        /*
         const auto& pos = context.pos(spaceIdx, timeIdx);
         if (onLeftBoundary_(pos)) {
             Opm::CompositionalFluidState<Scalar, FluidSystem> fs;
@@ -507,7 +508,18 @@ public:
         else
             // no flow on top and bottom
             values.setNoFlow();
-    }
+        */
+
+        // Temporary BC's from HAF ****START*************************************
+        Opm::CompositionalFluidState<Scalar, FluidSystem> fs;
+        initialFluidState_(fs, context, spaceIdx, timeIdx);
+        fs.checkDefined();
+
+        // impose an freeflow boundary condition --- 
+        values.setFreeFlow(context, spaceIdx, timeIdx, fs); //This is a constant pressure BC???
+        //values.setNoFlow(); //No flow...
+        // Temporary BC's from HAF ****END***************************************
+}
 
     // \}
 
@@ -543,7 +555,17 @@ public:
                 const Context& context OPM_UNUSED,
                 unsigned spaceIdx OPM_UNUSED,
                 unsigned timeIdx OPM_UNUSED) const
-    { rate = Scalar(0.0); }
+    {
+        rate = Scalar(0.0);
+        // /*
+        unsigned globalDofIdx = context.globalSpaceIndex(spaceIdx, timeIdx);
+        int HAFTestIndex = 192 + 11;
+        if (globalDofIdx == HAFTestIndex)
+        {
+            rate[Indices::conti0EqIdx + CO2Idx] = 1e-2; // just a demo, [kg / m^3 / s]
+        }
+        // */
+    }
 
     //! \}
 

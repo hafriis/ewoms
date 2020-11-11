@@ -92,6 +92,7 @@ public:
         unsigned numRefinments = EWOMS_GET_PARAM(TypeTag, unsigned, GridGlobalRefinements);
 
 #warning hard-code 3D grid before reducing it to 2d
+        // /* //NOTE: For testing without VE influence!
         typedef Dune::PolyhedralGrid< 3, 3 > Grid3D;
         //std::unique_ptr< Grid3D >  grid3d;
 
@@ -111,6 +112,21 @@ public:
       Opm::TopSurf* ts;
       ts = Opm::TopSurf::create (*dgfPointer);
       gridPtr_.reset(new Grid (*ts));
+      // */
+
+          /*
+        //NOTE: For testing without VE influence!
+        // create DGF GridPtr from a dgf file
+        Dune::GridPtr< Grid > dgfPointer( dgfFileName );
+
+        // store pointer to dune grid
+        gridPtr_.reset( dgfPointer.release() );
+          */
+
+        // /*
+        //Printer ut ting om griddet:
+
+        // */
 
         if (numRefinments > 0)
             gridPtr_->globalRefine(static_cast<int>(numRefinments));

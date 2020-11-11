@@ -474,6 +474,8 @@ protected:
                 stencil.boundaryFace(boundaryFaceIdx).area()
                 * insideIntQuants.extrusionFactor();
 
+            //std::cout << " boundaryFaceIdx= " << boundaryFaceIdx << " THArea= " << stencil.boundaryFace(boundaryFaceIdx).area() << std::endl;
+
             Opm::Valgrind::CheckDefined(values[eqIdx]);
             assert(Opm::isfinite(values[eqIdx]));
         }
